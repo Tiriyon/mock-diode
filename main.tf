@@ -21,6 +21,9 @@ resource "docker_network" "diode_net" {
   }
 }
 
+
+
+
 # -----------------------------------------------------------------------
 # Images
 # -----------------------------------------------------------------------
@@ -35,6 +38,10 @@ resource "docker_image" "zabbix_agent" {
 
 resource "docker_image" "postgres" {
   name = "postgres:15-alpine"
+}
+
+resource "docker_image" "zabbix_web" {
+  name = "zabbix/zabbix-web-nginx-pgsql:alpine-latest"
 }
 
 # -----------------------------------------------------------------------
@@ -104,4 +111,27 @@ resource "docker_container" "zabbix_agent" {
     type      = "bind"
     read_only = true
   }
+}
+
+resource "docker_container" "zabbix_frontend" {
+  name       = "site-a-frontend"
+  image      = docker_image.zabbix_web.name
+  depends_on = [docker_container.zabbix_server]
+  networks_advanced {
+    name         = docker_network.diode_net.name
+    ipv4_address = "172.28.0.4"
+  }
+  ports {
+    internal = 8080
+    external = 8082
+  }
+  env = [
+    "ZBX_SERVER_HOST=site-a-zabbix-server",
+    "DB_SERVER_HOST=zabbix-postgres",
+    "DB_SERVER_PORT=5432",
+    "DB_SERVER_DBNAME=zabbix",
+    "POSTGRES_USER=zabbix",
+    "POSTGRES_PASSWORD=zabbixpass",
+    "PHP_TZ=UTC"
+  ]
 }
