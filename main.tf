@@ -10,23 +10,27 @@ terraform {
 
 provider "docker" {}
 
-# -----------------------------------------------------------------------
-# Docker Network
-# -----------------------------------------------------------------------
+# -----------------------------
+# Networks
+# -----------------------------
 
-resource "docker_network" "diode_net" {
-  name = "zabbix-diode-net"
+resource "docker_network" "site_a_net" {
+  name = "site-a-net"
   ipam_config {
-    subnet = "172.28.0.0/16"
+    subnet = "172.28.1.0/24"
   }
 }
 
+resource "docker_network" "site_b_net" {
+  name = "site-b-net"
+  ipam_config {
+    subnet = "172.28.2.0/24"
+  }
+}
 
-
-
-# -----------------------------------------------------------------------
+# -----------------------------
 # Images
-# -----------------------------------------------------------------------
+# -----------------------------
 
 resource "docker_image" "zabbix_server" {
   name = "zabbix/zabbix-server-pgsql:alpine-latest"
@@ -44,16 +48,20 @@ resource "docker_image" "zabbix_web" {
   name = "zabbix/zabbix-web-nginx-pgsql:alpine-latest"
 }
 
-# -----------------------------------------------------------------------
+resource "docker_image" "socat" {
+  name = "alpine/socat"
+}
+
+# -----------------------------
 # Containers
-# -----------------------------------------------------------------------
+# -----------------------------
 
 resource "docker_container" "postgres" {
   name  = "zabbix-postgres"
   image = docker_image.postgres.name
   networks_advanced {
-    name         = docker_network.diode_net.name
-    ipv4_address = "172.28.0.3"
+    name         = docker_network.site_a_net.name
+    ipv4_address = "172.28.1.3"
   }
   env = [
     "POSTGRES_USER=zabbix",
@@ -62,14 +70,20 @@ resource "docker_container" "postgres" {
   ]
 }
 
+
 resource "docker_container" "zabbix_server" {
   name       = "site-a-zabbix-server"
   image      = docker_image.zabbix_server.name
   depends_on = [docker_container.postgres]
   networks_advanced {
-    name         = docker_network.diode_net.name
-    ipv4_address = "172.28.0.2"
+    name         = docker_network.site_a_net.name
+    ipv4_address = "172.28.1.2"
   }
+
+  entrypoint = ["/bin/sh", "-c"]
+  command = [
+    "until pg_isready -h zabbix-postgres -U zabbix; do echo waiting for db...; sleep 2; done; /usr/sbin/zabbix_server -f"
+  ]
 
   env = [
     "DB_SERVER_HOST=zabbix-postgres",
@@ -87,39 +101,14 @@ resource "docker_container" "zabbix_server" {
   }
 }
 
-resource "docker_container" "zabbix_agent" {
-  name  = "site-b-agent"
-  image = docker_image.zabbix_agent.name
-  networks_advanced {
-    name         = docker_network.diode_net.name
-    ipv4_address = "172.28.0.5"
-  }
-
-  env = [
-    "ZBX_SERVER_HOST=172.28.0.2",
-    "ZBX_ACTIVE_CHECKS=1",
-    "ZBX_HOSTNAME=Site-B-Host",
-    "TLSConnect=psk",
-    "TLSAccept=psk",
-    "TLS_PSK_FILE=/etc/zabbix/psk/zabbix_agent.psk",
-    "TLS_PSK_ID=PSK001"
-  ]
-
-  mounts {
-    target    = "/etc/zabbix/psk"
-    source    = abspath("${path.module}/tls")
-    type      = "bind"
-    read_only = true
-  }
-}
 
 resource "docker_container" "zabbix_frontend" {
   name       = "site-a-frontend"
   image      = docker_image.zabbix_web.name
   depends_on = [docker_container.zabbix_server]
   networks_advanced {
-    name         = docker_network.diode_net.name
-    ipv4_address = "172.28.0.4"
+    name         = docker_network.site_a_net.name
+    ipv4_address = "172.28.1.4"
   }
   ports {
     internal = 8080
@@ -134,4 +123,46 @@ resource "docker_container" "zabbix_frontend" {
     "POSTGRES_PASSWORD=zabbixpass",
     "PHP_TZ=UTC"
   ]
+}
+
+
+resource "docker_container" "socat_relay" {
+  name       = "socat-relay"
+  image      = docker_image.socat.name
+  entrypoint = ["/bin/sh", "-c"]
+  command = [
+    "while true; do socat TCP-LISTEN:10051,fork,reuseaddr TCP:172.28.1.2:10051; done"
+  ]
+  networks_advanced {
+    name         = docker_network.site_b_net.name
+    ipv4_address = "172.28.2.10"
+  }
+  networks_advanced {
+    name         = docker_network.site_a_net.name
+    ipv4_address = "172.28.1.10"
+  }
+}
+
+resource "docker_container" "zabbix_agent" {
+  name  = "site-b-agent"
+  image = docker_image.zabbix_agent.name
+  networks_advanced {
+    name         = docker_network.site_b_net.name
+    ipv4_address = "172.28.2.5"
+  }
+  env = [
+    "ZBX_SERVER_HOST=172.28.2.10",
+    "ZBX_ACTIVE_CHECKS=1",
+    "ZBX_HOSTNAME=Site-B-Host",
+    "TLSConnect=psk",
+    "TLSAccept=psk",
+    "TLS_PSK_FILE=/etc/zabbix/psk/zabbix_agent.psk",
+    "TLS_PSK_ID=PSK001"
+  ]
+  mounts {
+    target    = "/etc/zabbix/psk"
+    source    = abspath("${path.module}/tls")
+    type      = "bind"
+    read_only = true
+  }
 }
