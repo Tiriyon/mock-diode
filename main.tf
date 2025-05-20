@@ -80,15 +80,11 @@ resource "docker_container" "zabbix_server" {
     ipv4_address = "172.28.1.2"
   }
 
-  entrypoint = ["/bin/sh", "-c"]
-  command = [
-    "until pg_isready -h zabbix-postgres -U zabbix; do echo waiting for db...; sleep 2; done; /usr/sbin/zabbix_server -f"
-  ]
-
   env = [
     "DB_SERVER_HOST=zabbix-postgres",
     "POSTGRES_USER=zabbix",
     "POSTGRES_PASSWORD=zabbixpass",
+    "POSTGRES_DB=zabbix",
     "TLS_PSK_FILE=/etc/zabbix/psk/zabbix_agent.psk",
     "TLS_PSK_ID=PSK001"
   ]
@@ -100,7 +96,6 @@ resource "docker_container" "zabbix_server" {
     read_only = true
   }
 }
-
 
 resource "docker_container" "zabbix_frontend" {
   name       = "site-a-frontend"
@@ -150,10 +145,12 @@ resource "docker_container" "zabbix_agent" {
     name         = docker_network.site_b_net.name
     ipv4_address = "172.28.2.5"
   }
+
   env = [
-    "ZBX_SERVER_HOST=172.28.2.10",
+    "ZBX_SERVER_HOST=172.28.2.10", # This is the socat relay IP
     "ZBX_ACTIVE_CHECKS=1",
     "ZBX_HOSTNAME=Site-B-Host",
+    "ZBX_HOST_METADATA=Site-B-Host", # REQUIRED FOR AUTOREG
     "TLSConnect=psk",
     "TLSAccept=psk",
     "TLS_PSK_FILE=/etc/zabbix/psk/zabbix_agent.psk",
