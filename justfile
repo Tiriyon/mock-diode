@@ -10,7 +10,7 @@ deploy:
 
 # Simulate the data diode by dropping output from server to agent
 simulate-diode:
-	docker exec site-a-zabbix-server iptables -A OUTPUT -d 172.28.0.5 -j DROP
+	sudo iptables -A DOCKER-USER -s 172.28.0.2 -d 172.28.0.5 -j DROP
 
 # Tail logs of Zabbix agent
 logs-agent:
