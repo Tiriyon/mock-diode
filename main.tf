@@ -1,4 +1,3 @@
-
 terraform {
   required_providers {
     docker = {
@@ -70,7 +69,6 @@ resource "docker_container" "postgres" {
   ]
 }
 
-
 resource "docker_container" "zabbix_server" {
   name       = "site-a-zabbix-server"
   image      = docker_image.zabbix_server.name
@@ -120,7 +118,6 @@ resource "docker_container" "zabbix_frontend" {
   ]
 }
 
-
 resource "docker_container" "socat_relay" {
   name       = "socat-relay"
   image      = docker_image.socat.name
@@ -147,10 +144,10 @@ resource "docker_container" "zabbix_agent" {
   }
 
   env = [
-    "ZBX_SERVER_HOST=172.28.2.10", # This is the socat relay IP
+    "ZBX_SERVER_HOST=172.28.2.10",
     "ZBX_ACTIVE_CHECKS=1",
     "ZBX_HOSTNAME=Site-B-Host",
-    "ZBX_HOST_METADATA=Site-B-Host", # REQUIRED FOR AUTOREG
+    "ZBX_HOST_METADATA=Site-B-Host",
     "TLSConnect=psk",
     "TLSAccept=psk",
     "TLS_PSK_FILE=/etc/zabbix/psk/zabbix_agent.psk",
