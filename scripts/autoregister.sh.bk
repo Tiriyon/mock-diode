@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ZBX_API=http://localhost:8082/api_jsonrpc.php
+ZBX_USER=Admin
+ZBX_PASS=zabbix
+PSK_ID=$(<./tls/zabbix_agent.psk_id)
+PSK_KEY=$(<./tls/zabbix_agent.psk)
+
+echo "🔐 Authenticating with Zabbix API..."
+
+AUTH_TOKEN=$(
+  curl -s -X POST "$ZBX_API" \
+    -H "Content-Type: application/json-rpc" \
+    -d @- <<EOF | jq -r .result
+{
+  "jsonrpc": "2.0",
+  "method": "user.login",
+  "params": {
+    "username": "$ZBX_USER",
+    "password": "$ZBX_PASS"
+  },
+  "id": 1
+}
+EOF
+)
+
+if [[ "$AUTH_TOKEN" == "null" || -z "$AUTH_TOKEN" ]]; then
+  echo "❌ Failed to authenticate with Zabbix API"
+  exit 1
+fi
+
+echo "✅ Authenticated. Token: $AUTH_TOKEN"
+
+# -------------------------------
+# Create autoregistration action
+# -------------------------------
+ACTION_ID=$(curl -s -X POST "$ZBX_API" \
+  -H "Content-Type: application/json-rpc" \
+  -d "{
+    \"jsonrpc\": \"2.0\",
+    \"method\": \"action.create\",
+    \"params\": {
+      \"name\": \"Auto-Register PSK Hosts\",
+      \"eventsource\": 2,
+      \"status\": 0,
+      \"filter\": {
+        \"conditions\": [
+          {
+            \"conditiontype\": 24,
+            \"operator\": 2,
+            \"value\": \"Linux\"
+          }
+        ]
+      },
+      \"operations\": [
+        {
+          \"operationtype\": 2,
+          \"opgroup\": [ { \"groupid\": \"2\" } ]
+        },
+        {
+          \"operationtype\": 6,
+          \"optemplate\": [ { \"templateid\": \"10001\" } ]
+        }
+      ]
+    },
+    \"auth\": \"$AUTH_TOKEN\",
+    \"id\": 2
+  }" | jq -r .result.actionids[0])
+
+echo "📦 Created autoregistration action with ID: $ACTION_ID"
+
+# -------------------------------
+# Add PSK to the action
+# -------------------------------
+curl -s -X POST "$ZBX_API" \
+  -H "Content-Type: application/json-rpc" \
+  -d "{
+    \"jsonrpc\": \"2.0\",
+    \"method\": \"action.update\",
+    \"params\": {
+      \"actionid\": \"$ACTION_ID\",
+      \"operations\": [
+        {
+          \"operationtype\": 10,
+          \"details\": {
+            \"tls_psk_identity\": \"$PSK_ID\",
+            \"tls_psk\": \"$PSK_KEY\"
+          }
+        }
+      ]
+    },
+    \"auth\": \"$AUTH_TOKEN\",
+    \"id\": 3
+  }" | jq .
+
+echo "🔐 PSK authentication applied to autoregistration"
